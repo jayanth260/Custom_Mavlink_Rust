@@ -1,0 +1,136 @@
+name: Test all targets
+
+on: [push, pull_request]
+
+jobs:
+  formatting:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@master
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Run rustfmt
+        run: cargo fmt --all -- --check
+
+  linting:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@master
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2023-10-21
+          components: clippy
+      - uses: actions-rs-plus/clippy-check@v2
+        with:
+          args: --all --all-targets --features format-generated-code
+
+  internal-tests:
+    runs-on: ubuntu-latest
+    strategy:
+        matrix:
+          dialect: ["ardupilotmega", "asluav", "matrixpilot", "minimal", "paparazzi", "python_array_test", "slugs", "standard", "test", "ualberta", "uavionix", "icarous", "common"]
+    steps:
+      - uses: actions/checkout@master
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Run internal tests
+        run: cargo test --verbose --features ${{ matrix.dialect }} -- --nocapture
+
+  mavlink-dump:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@master
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build mavlink-dump
+        run: cargo build --verbose --example mavlink-dump
+
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@master
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.65.0
+      - uses: actions-rs/cargo@v1
+        with:
+          command: install
+          args: cross --locked
+      - uses: actions-rs/cargo@v1
+        with:
+          use-cross: true
+          command: check
+          args: --all --all-targets
+
+  build:
+    needs: [formatting, linting, internal-tests, mavlink-dump, msrv]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            TARGET: x86_64-apple-darwin
+            FEATURES: --features ardupilotmega
+
+          - os: ubuntu-latest
+            TARGET: arm-unknown-linux-musleabihf
+            FLAGS: --features ardupilotmega
+
+          - os: ubuntu-latest
+            TARGET: armv7-unknown-linux-musleabihf
+            FLAGS: --features ardupilotmega
+
+          - os: ubuntu-latest
+            TARGET: x86_64-unknown-linux-musl
+            FLAGS: --features ardupilotmega
+
+          - os: ubuntu-latest
+            TARGET: x86_64-unknown-linux-musl
+            FLAGS: --features ardupilotmega,emit-description,emit-extensions
+
+          - os: ubuntu-latest
+            TARGET: thumbv7m-none-eabi
+            FLAGS: --no-default-features --features embedded
+
+          - os: windows-latest
+            TARGET: x86_64-pc-windows-msvc
+            FLAGS: --features ardupilotmega
+
+    steps:
+      - name: Building ${{ matrix.TARGET }}
+        run: echo "${{ matrix.TARGET }}"
+      - uses: actions/checkout@master
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          target: ${{ matrix.TARGET }}
+      - uses: actions-rs/cargo@v1
+        with:
+          use-cross: true
+          command: build
+          args: --verbose --release --package=mavlink --target=${{ matrix.TARGET }} ${{ matrix.FLAGS }}
+
+  test-embedded-size:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@master
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          target: thumbv7em-none-eabihf
+      - name: Build
+        run: cargo +nightly build --target thumbv7em-none-eabihf --manifest-path mavlink/examples/embedded/Cargo.toml --out-dir $PWD --release -Z unstable-options
+
+  docs:
+    needs: internal-tests
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@master
+    - uses: dtolnay/rust-toolchain@stable
+    - name: Build docs
+      run: cargo doc
+    - name: Deploy
+      uses: peaceiris/actions-gh-pages@v3
+      if: ${{ github.ref == 'refs/heads/master' }}
+      with:
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+        publish_dir: ./target/doc
