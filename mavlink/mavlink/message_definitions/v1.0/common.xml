@@ -7633,7 +7633,7 @@
     <description>custom message</description>
     <field type = "uint8_t" name = "posx" invalid = "0"> x position</field>
     <field type = "uint8_t" name = "posy" invalid = "0"> y position</field>
-    <field type = "char[20]" name = "str" invalid = "['0']"> custom string</field>
+    <field type = "char[20]" name = "msg" invalid = "['0']"> custom string</field>
     </message>
   </messages>
 </mavlink>
